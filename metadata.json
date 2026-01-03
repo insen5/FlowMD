@@ -1,0 +1,7 @@
+{
+  "name": "FlowMD - AI-Native EMR/HMIS",
+  "description": "The first EMR that learns how you practice medicine and quietly keeps up",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
