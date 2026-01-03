@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Patient, Medication, ClinicalContext, VisitSOAP, SOAPSegment } from '../types';
+import { Patient, Medication, ClinicalContext, VisitSOAP, SOAPSegment, ClaimData } from '../types';
 import { COMMON_SYMPTOMS } from '../constants';
-import { getPredictionsForPatient, processAmbientNotes, getClinicalContext } from '../geminiService';
+import { getPredictionsForPatient, processAmbientNotes, getClinicalContext, extractClaimData } from '../geminiService';
 import { 
   Mic, Check, X, ChevronLeft, Plus, Save, Activity, Sparkles, AlertCircle, 
   History, Zap, CheckCircle2, ShieldCheck, Layers, Calendar, ArrowRight, 
-  Clock, UserCheck, MessageSquare, Copy, TrendingUp, Bold, Italic, List, AlignLeft 
+  Clock, UserCheck, MessageSquare, Copy, TrendingUp, Bold, Italic, List, AlignLeft,
+  DollarSign, FileCheck, Loader2
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +33,10 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
   const [transcriptSegments, setTranscriptSegments] = useState<{ role: 'Doctor' | 'Patient', text: string }[]>([]);
   const [activeTab, setActiveTab] = useState<'symptoms' | 'notes' | 'assessment' | 'plan' | 'history'>('symptoms');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  
+  // Financial Synergy States
+  const [isExtractingClaim, setIsExtractingClaim] = useState(false);
+  const [claimData, setClaimData] = useState<ClaimData | null>(null);
 
   const recognitionRef = useRef<any>(null);
 
@@ -112,6 +117,35 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
       });
     }
     setIsProcessing(false);
+  };
+
+  const handleFinalSubmit = async () => {
+    setIsExtractingClaim(true);
+    
+    // Combine notes for financial extraction
+    const clinicalSummary = `
+      Patient: ${patient.name}
+      Manual Findings: ${manualNotes}
+      Subjective: ${soapDraft?.subjective.content}
+      Assessment: ${soapDraft?.assessment.content}
+    `;
+
+    const billingInfo = await extractClaimData(clinicalSummary);
+    setClaimData(billingInfo);
+    setIsExtractingClaim(false);
+
+    // DISPATCHING SYNERGY EVENT TO CLAIMFLOW
+    // The host application (ClaimFlow) can listen for this to auto-fill claims
+    const claimReadyEvent = new CustomEvent('flowmd:claim-ready', {
+      detail: {
+        patientId: patient.id,
+        claimData: billingInfo,
+        clinicalSummary: clinicalSummary
+      },
+      bubbles: true,
+      composed: true
+    });
+    window.dispatchEvent(claimReadyEvent);
   };
 
   const toggleSymptom = (label: string) => {
@@ -361,8 +395,37 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                       </div>
                       <button onClick={() => setIsPreviewOpen(false)} className="p-3 bg-white border rounded-2xl text-slate-400"><X size={20}/></button>
                   </div>
+                  
                   <div className="p-8 overflow-y-auto no-scrollbar space-y-6">
-                      <div className="p-8 bg-white border shadow-inner rounded-3xl space-y-6 font-serif">
+                      {claimData ? (
+                        <div className="p-8 bg-blue-50 rounded-[2.5rem] border-2 border-blue-200 animate-in zoom-in-95 duration-300">
+                           <div className="flex items-center gap-2 mb-4">
+                              <DollarSign size={20} className="text-blue-600" />
+                              <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">ClaimFlow Financial Extraction</span>
+                           </div>
+                           <div className="grid grid-cols-2 gap-4 mb-6">
+                              <div className="space-y-1">
+                                <div className="text-[8px] font-black uppercase text-slate-400">Diagnosis Codes</div>
+                                {claimData.diagnosisCodes.map(c => <div key={c} className="text-xs font-bold text-slate-900">{c}</div>)}
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-[8px] font-black uppercase text-slate-400">Procedure Codes</div>
+                                {claimData.procedureCodes.map(c => <div key={c} className="text-xs font-bold text-slate-900">{c}</div>)}
+                              </div>
+                           </div>
+                           <div className="p-4 bg-white rounded-2xl border border-blue-100 flex items-center justify-between">
+                              <span className="text-[10px] font-black uppercase text-slate-400">Est. Reimbursement</span>
+                              <span className="text-lg font-black text-blue-600">${claimData.estimatedReimbursement}</span>
+                           </div>
+                           <div className="mt-6 flex gap-3">
+                              <button onClick={() => setClaimData(null)} className="flex-1 py-4 border border-blue-200 rounded-2xl text-[10px] font-black uppercase text-blue-600 tracking-widest bg-white">Back to Notes</button>
+                              <button onClick={onBack} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200 flex items-center justify-center gap-2">
+                                <FileCheck size={14} /> Send to Payer
+                              </button>
+                           </div>
+                        </div>
+                      ) : (
+                        <div className="p-8 bg-white border shadow-inner rounded-3xl space-y-6 font-serif">
                           <div className="border-b pb-4 mb-4">
                               <h2 className="text-lg font-black italic">Flow<span className="text-blue-600">MD</span> Record</h2>
                               <p className="text-[10px] font-sans font-black uppercase text-slate-400 mt-1">{new Date().toLocaleDateString()} • {patient.name}</p>
@@ -377,8 +440,22 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                                   <p className="text-sm leading-relaxed">{soapDraft?.subjective.content || "N/A"}</p>
                               </div>
                           </div>
-                      </div>
-                      <button className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase tracking-[0.3em] text-[11px] shadow-2xl shadow-slate-200">Submit Record & Sync</button>
+                        </div>
+                      )}
+                      
+                      {!claimData && (
+                        <button 
+                          onClick={handleFinalSubmit}
+                          disabled={isExtractingClaim}
+                          className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase tracking-[0.3em] text-[11px] shadow-2xl shadow-slate-200 flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-50"
+                        >
+                          {isExtractingClaim ? (
+                            <> <Loader2 size={18} className="animate-spin" /> Analyzing Billing...</>
+                          ) : (
+                            <>Submit Record & Sync</>
+                          )}
+                        </button>
+                      )}
                   </div>
               </div>
           </div>

@@ -1,7 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Strictly adhering to initialization guidelines: { apiKey: process.env.API_KEY }
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getPredictionsForPatient = async (patientName: string, history: string[]) => {
@@ -126,6 +125,37 @@ export const processAmbientNotes = async (transcript: string) => {
     return JSON.parse(response.text || '{}');
   } catch (error) {
     console.error("SOAP error:", error);
+    return null;
+  }
+};
+
+/**
+ * FINANCIAL INTELLIGENCE LAYER (CLAIMFLOW BRIDGE)
+ * Backlogged from PRD synergy discussion.
+ */
+export const extractClaimData = async (clinicalNotes: string) => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Examine these clinical notes and extract Billing Intelligence for a medical claim.
+      Provide ICD-10 diagnosis codes and CPT procedure codes.
+      Notes: "${clinicalNotes}"`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            diagnosisCodes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            procedureCodes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            estimatedReimbursement: { type: Type.NUMBER },
+            payer: { type: Type.STRING }
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text || '{}');
+  } catch (error) {
+    console.error("Claim extraction error:", error);
     return null;
   }
 };

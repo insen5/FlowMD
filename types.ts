@@ -7,6 +7,8 @@ export interface Patient {
   lastVisit: string;
   history: string[];
   trend?: 'improving' | 'stable' | 'worsening';
+  eligibilityStatus?: 'Verified' | 'Pending' | 'Denied';
+  claimStatus?: 'Draft' | 'Submitted' | 'Paid' | 'None';
 }
 
 export interface Symptom {
@@ -70,4 +72,11 @@ export interface ClinicalContext {
   suggestedMedications: Medication[];
   insight: string;
   similarCases: SimilarCase[];
+}
+
+export interface ClaimData {
+  diagnosisCodes: string[];
+  procedureCodes: string[];
+  estimatedReimbursement: number;
+  payer: string;
 }

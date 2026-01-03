@@ -9,7 +9,9 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Male', 
     lastVisit: '2023-10-12', 
     history: ['Hypertension', 'Type 2 Diabetes'],
-    trend: 'improving'
+    trend: 'improving',
+    eligibilityStatus: 'Verified',
+    claimStatus: 'Paid'
   },
   { 
     id: '2', 
@@ -18,7 +20,9 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Female', 
     lastVisit: '2023-11-05', 
     history: ['Seasonal Allergies', 'Asthma'],
-    trend: 'stable'
+    trend: 'stable',
+    eligibilityStatus: 'Verified',
+    claimStatus: 'Draft'
   },
   { 
     id: '3', 
@@ -27,7 +31,9 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Male', 
     lastVisit: '2023-09-20', 
     history: ['COPD', 'Gout', 'CKD Stage 2'],
-    trend: 'worsening'
+    trend: 'worsening',
+    eligibilityStatus: 'Denied',
+    claimStatus: 'None'
   },
   { 
     id: '4', 
@@ -36,7 +42,9 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Female', 
     lastVisit: '2023-11-20', 
     history: ['Anxiety', 'Insomnia'],
-    trend: 'stable'
+    trend: 'stable',
+    eligibilityStatus: 'Pending',
+    claimStatus: 'None'
   },
 ];
 
