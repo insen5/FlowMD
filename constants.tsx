@@ -9,6 +9,10 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Male', 
     lastVisit: '2023-10-12', 
     history: ['Hypertension', 'Type 2 Diabetes'],
+    clinicalJourney: [
+      { condition: 'Hypertension', date: '2018-05-15', severity: 'Chronic' },
+      { condition: 'Type 2 Diabetes', date: '2021-11-20', severity: 'Moderate' }
+    ],
     trend: 'improving',
     eligibilityStatus: 'Verified',
     claimStatus: 'Paid'
@@ -20,6 +24,10 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Female', 
     lastVisit: '2023-11-05', 
     history: ['Seasonal Allergies', 'Asthma'],
+    clinicalJourney: [
+      { condition: 'Asthma', date: '2010-02-10', severity: 'Chronic' },
+      { condition: 'Seasonal Allergies', date: '2015-06-22', severity: 'Mild' }
+    ],
     trend: 'stable',
     eligibilityStatus: 'Verified',
     claimStatus: 'Draft'
@@ -31,6 +39,11 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Male', 
     lastVisit: '2023-09-20', 
     history: ['COPD', 'Gout', 'CKD Stage 2'],
+    clinicalJourney: [
+      { condition: 'COPD', date: '2012-10-14', severity: 'Severe' },
+      { condition: 'CKD Stage 2', date: '2019-03-05', severity: 'Chronic' },
+      { condition: 'Gout', date: '2022-08-11', severity: 'Moderate' }
+    ],
     trend: 'worsening',
     eligibilityStatus: 'Denied',
     claimStatus: 'None'
@@ -42,6 +55,10 @@ export const MOCK_PATIENTS: Patient[] = [
     gender: 'Female', 
     lastVisit: '2023-11-20', 
     history: ['Anxiety', 'Insomnia'],
+    clinicalJourney: [
+      { condition: 'Anxiety', date: '2020-04-30', severity: 'Moderate' },
+      { condition: 'Insomnia', date: '2022-12-15', severity: 'Mild' }
+    ],
     trend: 'stable',
     eligibilityStatus: 'Pending',
     claimStatus: 'None'
@@ -57,6 +74,18 @@ export const COMMON_SYMPTOMS: Symptom[] = [
   { id: 's6', label: 'Headache', category: 'Neurological' },
   { id: 's7', label: 'Body Ache', category: 'General' },
   { id: 's8', label: 'Chest Pain', category: 'Cardiac' },
+  { id: 's9', label: 'Itching', category: 'Dermatological' },
+  { id: 's10', label: 'Rash', category: 'Dermatological' },
+  { id: 's11', label: 'Dizziness', category: 'Neurological' },
+  { id: 's12', label: 'Abdominal Pain', category: 'GI' },
+  { id: 's13', label: 'Vomiting', category: 'GI' },
+  { id: 's14', label: 'Diarrhea', category: 'GI' },
+  { id: 's15', label: 'Joint Pain', category: 'Musculoskeletal' },
+  { id: 's16', label: 'Sore Throat', category: 'HEENT' },
+  { id: 's17', label: 'Congestion', category: 'Respiratory' },
+  { id: 's18', label: 'Heartburn', category: 'GI' },
+  { id: 's19', label: 'Back Pain', category: 'Musculoskeletal' },
+  { id: 's20', label: 'Insomnia', category: 'Neurological' },
 ];
 
 export const INITIAL_BEDS: Bed[] = Array.from({ length: 8 }, (_, i) => ({

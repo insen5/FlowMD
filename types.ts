@@ -1,11 +1,18 @@
 
+export interface ClinicalHistory {
+  condition: string;
+  date: string; // YYYY-MM-DD
+  severity?: 'Mild' | 'Moderate' | 'Severe' | 'Chronic';
+}
+
 export interface Patient {
   id: string;
   name: string;
   age: number;
   gender: string;
   lastVisit: string;
-  history: string[];
+  history: string[]; // Keep for legacy/simple display
+  clinicalJourney?: ClinicalHistory[]; // Structured history for timeline
   trend?: 'improving' | 'stable' | 'worsening';
   eligibilityStatus?: 'Verified' | 'Pending' | 'Denied';
   claimStatus?: 'Draft' | 'Submitted' | 'Paid' | 'None';
@@ -22,6 +29,19 @@ export interface Medication {
   name: string;
   dosage: string;
   frequency: string;
+}
+
+export interface SafetyAlert {
+  type: 'Contraindication' | 'Caution' | 'Interaction';
+  message: string;
+  severity: 'High' | 'Medium' | 'Low';
+}
+
+export interface DifferentialDiagnosis {
+  name: string;
+  probability: number;
+  icd10: string;
+  reasoning: string;
 }
 
 export interface ChecklistItem {
@@ -67,9 +87,9 @@ export interface VisitSOAP {
 }
 
 export interface ClinicalContext {
-  relatedSymptoms: string[];
-  likelyDiagnoses: string[];
-  suggestedMedications: Medication[];
+  differentialDiagnoses: DifferentialDiagnosis[];
+  recommendedLabs: Array<{ name: string; urgency: string }>;
+  safetyAlerts: SafetyAlert[];
   insight: string;
   similarCases: SimilarCase[];
 }
