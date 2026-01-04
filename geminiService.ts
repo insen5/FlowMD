@@ -270,18 +270,39 @@ export const extractClaimData = async (clinicalNotes: string) => {
   return callWithRetryAndCache(null, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Examine these clinical notes and extract Billing Intelligence for a medical claim.
-      Provide ICD-10 diagnosis codes and CPT procedure codes.
+      contents: `Act as a Certified Medical Auditor and Billing Specialist. Examine these clinical notes and extract Billing Intelligence for a medical claim.
+      For every ICD-10 and CPT code suggested, you MUST provide 'evidence' which is a verbatim quote from the notes justifying that code.
       Notes: "${clinicalNotes}"`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            diagnosisCodes: { type: Type.ARRAY, items: { type: Type.STRING } },
-            procedureCodes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            diagnosisCodes: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  code: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  evidence: { type: Type.STRING }
+                }
+              } 
+            },
+            procedureCodes: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  code: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  evidence: { type: Type.STRING }
+                }
+              } 
+            },
             estimatedReimbursement: { type: Type.NUMBER },
-            payer: { type: Type.STRING }
+            payer: { type: Type.STRING },
+            billingComplexity: { type: Type.STRING, description: "Low, Moderate, or High complexity based on MDM." }
           }
         }
       }

@@ -94,9 +94,16 @@ export interface ClinicalContext {
   similarCases: SimilarCase[];
 }
 
+export interface JustifiedCode {
+  code: string;
+  description: string;
+  evidence: string; // Verbatim snippet from the notes
+}
+
 export interface ClaimData {
-  diagnosisCodes: string[];
-  procedureCodes: string[];
+  diagnosisCodes: JustifiedCode[];
+  procedureCodes: JustifiedCode[];
   estimatedReimbursement: number;
   payer: string;
+  billingComplexity: 'Low' | 'Moderate' | 'High';
 }

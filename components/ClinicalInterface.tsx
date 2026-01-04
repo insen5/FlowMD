@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Patient, Medication, ClinicalContext, VisitSOAP, SOAPSegment, ClaimData, DifferentialDiagnosis } from '../types';
+import { Patient, Medication, ClinicalContext, VisitSOAP, SOAPSegment, ClaimData, DifferentialDiagnosis, JustifiedCode } from '../types';
 import { COMMON_SYMPTOMS } from '../constants';
 import { getPredictionsForPatient, processAmbientNotes, getClinicalContext, extractClaimData, generatePatientFriendlySummary, getRelatedSymptoms, getPlanSuggestions } from '../geminiService';
 import { 
@@ -9,7 +9,8 @@ import {
   Clock, UserCheck, MessageSquare, Copy, TrendingUp, Bold, Italic, List, AlignLeft,
   DollarSign, FileCheck, Loader2, ShieldAlert, ClipboardCheck, Edit3, Stethoscope,
   Info, FlaskConical, Target, ShieldX, UserPlus, HeartHandshake, Search, ListTodo, Brain,
-  Trash2, Filter, Command, Eye, Thermometer, HeartPulse, ClipboardList, Pill, Users
+  Trash2, Filter, Command, Eye, Thermometer, HeartPulse, ClipboardList, Pill, Users,
+  Quote
 } from 'lucide-react';
 
 interface Props {
@@ -330,6 +331,21 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
   const suggestedSearchResults = symptomSearch.length > 1 
     ? COMMON_SYMPTOMS.filter(s => s.label.toLowerCase().includes(symptomSearch.toLowerCase()) && !selectedSymptoms.includes(s.label))
     : [];
+
+  const renderJustifiedCode = (jc: JustifiedCode) => (
+    <div key={jc.code} className="p-4 bg-white border border-blue-100 rounded-2xl space-y-2 group">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-black text-slate-900">{jc.code}</span>
+        <span className="text-[10px] font-bold text-slate-400 uppercase">{jc.description}</span>
+      </div>
+      <div className="flex gap-2 bg-slate-50 p-2.5 rounded-xl border border-dashed border-slate-200">
+        <Quote size={12} className="text-blue-400 shrink-0 mt-0.5" />
+        <p className="text-[10px] text-slate-600 leading-relaxed font-serif italic">
+          "{jc.evidence}"
+        </p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
@@ -823,22 +839,37 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
               </div>
 
               {claimData ? (
-                <div className="p-8 bg-blue-50 rounded-[3rem] border-2 border-blue-200">
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="space-y-1">
-                      <div className="text-[8px] font-black uppercase text-slate-400">Diagnosis (ICD-10)</div>
-                      {claimData.diagnosisCodes.map(c => <div key={c} className="text-xs font-bold text-slate-900">{c}</div>)}
+                <div className="p-8 bg-blue-50 rounded-[3rem] border-2 border-blue-200 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-[8px] font-black uppercase text-slate-400 tracking-widest">MDM Complexity</div>
+                      <div className="text-sm font-black text-blue-900">{claimData.billingComplexity || 'Moderate'}</div>
                     </div>
-                    <div className="space-y-1">
-                      <div className="text-[8px] font-black uppercase text-slate-400">Procedures (CPT)</div>
-                      {claimData.procedureCodes.map(c => <div key={c} className="text-xs font-bold text-slate-900">{c}</div>)}
+                    <div className="p-3 bg-white rounded-2xl border border-blue-100 text-right">
+                      <span className="text-[10px] font-black uppercase text-slate-400 block">Expected Yield</span>
+                      <span className="text-lg font-black text-blue-600">${claimData.estimatedReimbursement}</span>
                     </div>
                   </div>
-                  <div className="p-4 bg-white rounded-2xl border border-blue-100 flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-slate-400">Expected Yield</span>
-                    <span className="text-lg font-black text-blue-600">${claimData.estimatedReimbursement}</span>
+
+                  <div className="space-y-4">
+                    <div className="text-[9px] font-black uppercase text-slate-400 tracking-[0.2em] flex items-center gap-2">
+                      <ShieldCheck size={14} className="text-blue-500" /> Diagnosis Codes (ICD-10)
+                    </div>
+                    <div className="space-y-2">
+                      {claimData.diagnosisCodes.map((jc: any) => renderJustifiedCode(jc))}
+                    </div>
                   </div>
-                  <button onClick={onBack} className="w-full mt-6 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200">Archive & Sync</button>
+
+                  <div className="space-y-4">
+                    <div className="text-[9px] font-black uppercase text-slate-400 tracking-[0.2em] flex items-center gap-2">
+                      <Layers size={14} className="text-blue-500" /> Procedure Codes (CPT)
+                    </div>
+                    <div className="space-y-2">
+                      {claimData.procedureCodes.map((jc: any) => renderJustifiedCode(jc))}
+                    </div>
+                  </div>
+
+                  <button onClick={onBack} className="w-full mt-6 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all">Archive & Sync to Clearinghouse</button>
                 </div>
               ) : patientSummary ? (
                 <div className="p-8 bg-emerald-50 rounded-[3rem] border-2 border-emerald-100">
