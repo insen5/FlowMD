@@ -1,5 +1,5 @@
 
-import { Patient, Symptom, Bed } from './types';
+import { Patient, Symptom, Bed, Appointment } from './types';
 
 export const MOCK_PATIENTS: Patient[] = [
   { 
@@ -63,6 +63,42 @@ export const MOCK_PATIENTS: Patient[] = [
     eligibilityStatus: 'Pending',
     claimStatus: 'None'
   },
+];
+
+export const MOCK_APPOINTMENTS: Appointment[] = [
+  {
+    id: 'a1',
+    patientId: '1',
+    patientName: 'John Doe',
+    startTime: new Date().setHours(9, 0, 0, 0).toString(),
+    endTime: new Date().setHours(9, 30, 0, 0).toString(),
+    reason: 'Hypertension Follow-up',
+    type: 'Follow-up',
+    noShowRisk: 'Low',
+    status: 'Arrived'
+  },
+  {
+    id: 'a2',
+    patientId: '2',
+    patientName: 'Jane Smith',
+    startTime: new Date().setHours(10, 0, 0, 0).toString(),
+    endTime: new Date().setHours(10, 45, 0, 0).toString(),
+    reason: 'Asthma Exacerbation',
+    type: 'Urgent',
+    noShowRisk: 'Medium',
+    status: 'Scheduled'
+  },
+  {
+    id: 'a3',
+    patientId: '3',
+    patientName: 'Robert Wilson',
+    startTime: new Date().setHours(11, 0, 0, 0).toString(),
+    endTime: new Date().setHours(12, 0, 0, 0).toString(),
+    reason: 'Pre-op Clearance',
+    type: 'Procedure',
+    noShowRisk: 'High',
+    status: 'Scheduled'
+  }
 ];
 
 export const COMMON_SYMPTOMS: Symptom[] = [

@@ -11,11 +11,23 @@ export interface Patient {
   age: number;
   gender: string;
   lastVisit: string;
-  history: string[]; // Keep for legacy/simple display
-  clinicalJourney?: ClinicalHistory[]; // Structured history for timeline
+  history: string[]; 
+  clinicalJourney?: ClinicalHistory[]; 
   trend?: 'improving' | 'stable' | 'worsening';
   eligibilityStatus?: 'Verified' | 'Pending' | 'Denied';
   claimStatus?: 'Draft' | 'Submitted' | 'Paid' | 'None';
+}
+
+export interface Appointment {
+  id: string;
+  patientId: string;
+  patientName: string;
+  startTime: string; // Timestamp string
+  endTime: string; // Timestamp string
+  reason: string;
+  type: 'Routine' | 'Urgent' | 'Follow-up' | 'Procedure';
+  noShowRisk: 'Low' | 'Medium' | 'High';
+  status: 'Scheduled' | 'Arrived' | 'Cancelled' | 'In-Progress';
 }
 
 export interface Symptom {
@@ -61,7 +73,7 @@ export interface Bed {
 }
 
 export enum ViewState {
-  PATIENTS = 'patients',
+  DASHBOARD = 'dashboard', // Merged Queue + Schedule
   VISIT = 'visit',
   BEDS = 'beds'
 }
@@ -97,8 +109,8 @@ export interface ClinicalContext {
 export interface JustifiedCode {
   code: string;
   description: string;
-  evidence: string; // Verbatim snippet from the notes
-  sourceSection: 'Subjective' | 'Objective' | 'Assessment' | 'Plan' | 'Exam' | 'History'; // Audit trail source
+  evidence: string; 
+  sourceSection: 'Subjective' | 'Objective' | 'Assessment' | 'Plan' | 'Exam' | 'History'; 
 }
 
 export interface ClaimData {

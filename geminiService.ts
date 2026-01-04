@@ -41,6 +41,57 @@ const callWithRetryAndCache = async (cacheKey: string | null, fn: () => Promise<
   throw lastError;
 };
 
+export const parseSchedulingCommand = async (command: string) => {
+  return callWithRetryAndCache(null, async () => {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Parse this clinical scheduling command into a structured object.
+      Command: "${command}"
+      Reference Date: ${new Date().toLocaleDateString()}
+      Return the patient name, reason for visit, date, time (24h format), and duration in minutes.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            patientName: { type: Type.STRING },
+            reason: { type: Type.STRING },
+            date: { type: Type.STRING, description: "YYYY-MM-DD" },
+            time: { type: Type.STRING, description: "HH:mm" },
+            duration: { type: Type.NUMBER },
+            type: { type: Type.STRING, enum: ["Routine", "Urgent", "Follow-up", "Procedure"] }
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text || '{}');
+  });
+};
+
+export const predictNoShowRisk = async (patientName: string, history: string[]) => {
+  const cacheKey = `noshow_${patientName}`;
+  return callWithRetryAndCache(cacheKey, async () => {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Assess the risk of this patient not showing up for their appointment.
+      Patient: ${patientName}
+      Clinical Context: ${history.join(", ")}
+      Return a risk level (Low, Medium, High) and a one-sentence reasoning.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            riskLevel: { type: Type.STRING, enum: ["Low", "Medium", "High"] },
+            reasoning: { type: Type.STRING }
+          }
+        }
+      }
+    });
+    return JSON.parse(response.text || '{"riskLevel": "Low", "reasoning": "Standard profile."}');
+  });
+};
+
 export const getRelatedSymptoms = async (selectedSymptoms: string[]) => {
   if (selectedSymptoms.length === 0) return [];
   const cacheKey = `related_symptoms_${selectedSymptoms.sort().join('_')}`;
