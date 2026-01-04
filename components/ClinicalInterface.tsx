@@ -335,7 +335,10 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
   const renderJustifiedCode = (jc: JustifiedCode) => (
     <div key={jc.code} className="p-4 bg-white border border-blue-100 rounded-2xl space-y-2 group">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-black text-slate-900">{jc.code}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-black text-slate-900">{jc.code}</span>
+          <span className="text-[8px] font-black bg-blue-50 text-blue-600 px-2 py-0.5 rounded uppercase">{jc.sourceSection}</span>
+        </div>
         <span className="text-[10px] font-bold text-slate-400 uppercase">{jc.description}</span>
       </div>
       <div className="flex gap-2 bg-slate-50 p-2.5 rounded-xl border border-dashed border-slate-200">

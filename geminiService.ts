@@ -271,7 +271,11 @@ export const extractClaimData = async (clinicalNotes: string) => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Act as a Certified Medical Auditor and Billing Specialist. Examine these clinical notes and extract Billing Intelligence for a medical claim.
-      For every ICD-10 and CPT code suggested, you MUST provide 'evidence' which is a verbatim quote from the notes justifying that code.
+      For every ICD-10 and CPT code suggested, you MUST provide:
+      1. 'code': The standard code.
+      2. 'description': Brief description.
+      3. 'evidence': A verbatim quote from the notes justifying that code.
+      4. 'sourceSection': The section of the notes (Subjective, Objective, Assessment, Plan, Exam, or History) where the evidence was found.
       Notes: "${clinicalNotes}"`,
       config: {
         responseMimeType: "application/json",
@@ -285,7 +289,8 @@ export const extractClaimData = async (clinicalNotes: string) => {
                 properties: {
                   code: { type: Type.STRING },
                   description: { type: Type.STRING },
-                  evidence: { type: Type.STRING }
+                  evidence: { type: Type.STRING },
+                  sourceSection: { type: Type.STRING }
                 }
               } 
             },
@@ -296,7 +301,8 @@ export const extractClaimData = async (clinicalNotes: string) => {
                 properties: {
                   code: { type: Type.STRING },
                   description: { type: Type.STRING },
-                  evidence: { type: Type.STRING }
+                  evidence: { type: Type.STRING },
+                  sourceSection: { type: Type.STRING }
                 }
               } 
             },

@@ -98,6 +98,7 @@ export interface JustifiedCode {
   code: string;
   description: string;
   evidence: string; // Verbatim snippet from the notes
+  sourceSection: 'Subjective' | 'Objective' | 'Assessment' | 'Plan' | 'Exam' | 'History'; // Audit trail source
 }
 
 export interface ClaimData {
