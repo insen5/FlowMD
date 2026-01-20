@@ -28,7 +28,6 @@ const callWithRetryAndCache = async (cacheKey: string | null, fn: () => Promise<
       return result;
     } catch (error: any) {
       lastError = error;
-      // If it's a rate limit error, wait and retry
       if (error?.message?.includes('429') || error?.status === 429) {
         const waitTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
         console.warn(`Rate limit hit. Retrying in ${Math.round(waitTime)}ms...`);
@@ -120,12 +119,15 @@ export const getRelatedSymptoms = async (selectedSymptoms: string[]) => {
   }).catch(() => []);
 };
 
-export const getPlanSuggestions = async (context: string) => {
-  const cacheKey = `plan_sugg_${context.substring(0, 100)}`;
+export const getPlanSuggestions = async (context: string, confirmedDiagnoses: string[] = []) => {
+  const cacheKey = `plan_sugg_${context.substring(0, 50)}_${confirmedDiagnoses.join('_')}`;
   return callWithRetryAndCache(cacheKey, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Based on this clinical context: "${context}", suggest 5 high-impact next steps for the clinical plan (e.g., follow-up timelines, specific lifestyle advice, or coordination steps).`,
+      contents: `Based on this clinical context: "${context}" 
+      AND confirmed diagnoses: ${confirmedDiagnoses.join(", ") || 'None yet selected'}.
+      Suggest 5 high-impact next steps for the clinical plan (e.g., follow-up timelines, specific lifestyle advice, or coordination steps). 
+      If diagnoses are confirmed, suggest management specifically for those.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -177,26 +179,42 @@ export const getPatientBriefSummary = async (patient: any) => {
       Patient: ${patient.name}, ${patient.age}${patient.gender}.
       History: ${patient.history.join(", ")}.
       Vitals: Temp 98.6F, Pulse 72bpm, SpO2 99%.
-      Example: "32-year-old female with chronic asthma presenting for evaluation of seasonal allergy exacerbation; vitals remain stable."
       Keep it strictly one sentence, clinical, and high-signal.`,
     });
     return response.text;
   }).catch(() => "Clinically stable patient with longitudinal history; monitoring intake symptoms.");
 };
 
-export const getClinicalContext = async (selectedSymptoms: string[], history: string[]) => {
-  if (selectedSymptoms.length === 0) return null;
-  const cacheKey = `clinical_context_${selectedSymptoms.sort().join('_')}_${history.sort().join('_')}`;
+export const getClinicalContext = async (
+  selectedSymptoms: string[], 
+  history: string[], 
+  rosFindings?: string[], 
+  examFindings?: string[],
+  narrative?: string,
+  confirmedDiagnoses?: string[]
+) => {
+  if (selectedSymptoms.length === 0 && (!narrative || narrative.length < 10)) return null;
+  
+  const cacheKey = `clinical_context_${selectedSymptoms.sort().join('_')}_${history.sort().join('_')}_${confirmedDiagnoses?.join('_')}_${narrative?.length}`;
   
   return callWithRetryAndCache(cacheKey, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `The patient has these current symptoms: ${selectedSymptoms.join(", ")}. 
-      Longitudinal history: ${history.join(", ")}.
+      contents: `Act as a senior clinical diagnostician.
+      Current Symptoms: ${selectedSymptoms.join(", ")}
+      Longitudinal History: ${history.join(", ")}
+      Confirmed Diagnoses by Provider: ${confirmedDiagnoses?.join(", ") || 'None yet'}
+      ROS Findings (Abnormalities): ${rosFindings?.join(", ") || 'None noted'}
+      Physical Exam Abnormalities: ${examFindings?.join(", ") || 'None noted'}
+      Provider Narrative Notes: "${narrative || 'None'}"
+
+      Provide high-fidelity clinical reasoning. 
+      IMPORTANT: If diagnoses are confirmed, the recommended labs and investigations should specifically aim to manage or further workup those conditions.
+      
       Provide:
-      1. Differential Diagnoses (Name, Probability 0-1, ICD-10 Code, and Brief Clinical Reasoning explaining WHY based on history).
+      1. Differential Diagnoses (Name, Probability 0-1, ICD-10 Code, and Brief Clinical Reasoning).
       2. Recommended Lab/Imaging investigations (Name, Urgency).
-      3. Safety Alerts/Interaction Alerts: Check if current symptoms or likely treatments interact dangerously with their history (e.g. NSAIDs in CKD, Beta Blockers in Asthma).
+      3. Safety Alerts: Especially check for interactions between suspected diagnoses and historical conditions.
       4. A single clinical insight pearl.
       5. 2 Historical Clinical Twins.`,
       config: {
@@ -258,7 +276,6 @@ export const getClinicalContext = async (selectedSymptoms: string[], history: st
 };
 
 export const processAmbientNotes = async (transcript: string) => {
-  // Ambient notes are unique per session, no cache needed
   return callWithRetryAndCache(null, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -322,11 +339,6 @@ export const extractClaimData = async (clinicalNotes: string) => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Act as a Certified Medical Auditor and Billing Specialist. Examine these clinical notes and extract Billing Intelligence for a medical claim.
-      For every ICD-10 and CPT code suggested, you MUST provide:
-      1. 'code': The standard code.
-      2. 'description': Brief description.
-      3. 'evidence': A verbatim quote from the notes justifying that code.
-      4. 'sourceSection': The section of the notes (Subjective, Objective, Assessment, Plan, Exam, or History) where the evidence was found.
       Notes: "${clinicalNotes}"`,
       config: {
         responseMimeType: "application/json",
