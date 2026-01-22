@@ -1,14 +1,13 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Simple in-memory cache to prevent redundant calls
 const cache = new Map<string, { data: any, timestamp: number }>();
-const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+const CACHE_TTL = 1000 * 60 * 10; // 10 minutes for clinical sessions
 
 /**
- * Utility to wrap AI calls with caching and basic retry logic for rate limits.
+ * Utility to wrap AI calls with caching and basic retry logic.
  */
 const callWithRetryAndCache = async (cacheKey: string | null, fn: () => Promise<any>, retries = 2) => {
   if (cacheKey && cache.has(cacheKey)) {
@@ -30,7 +29,6 @@ const callWithRetryAndCache = async (cacheKey: string | null, fn: () => Promise<
       lastError = error;
       if (error?.message?.includes('429') || error?.status === 429) {
         const waitTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
-        console.warn(`Rate limit hit. Retrying in ${Math.round(waitTime)}ms...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
@@ -40,149 +38,117 @@ const callWithRetryAndCache = async (cacheKey: string | null, fn: () => Promise<
   throw lastError;
 };
 
-export const parseSchedulingCommand = async (command: string) => {
-  return callWithRetryAndCache(null, async () => {
+// Generates a simple hash to detect if content has changed enough to warrant a new AI call
+const generateContentHash = (content: string) => {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString();
+};
+
+export const getRegimenSuggestions = async (context: string, history: string[], confirmedDiagnoses: string[]) => {
+  if (confirmedDiagnoses.length === 0) return [];
+  
+  const stateString = `${context}_${confirmedDiagnoses.join(',')}`;
+  const cacheKey = `regimen_sugg_${generateContentHash(stateString)}`;
+  
+  return callWithRetryAndCache(cacheKey, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Parse this clinical scheduling command into a structured object.
-      Command: "${command}"
-      Reference Date: ${new Date().toLocaleDateString()}
-      Return the patient name, reason for visit, date, time (24h format), and duration in minutes.`,
+      contents: `Suggest a precise medical regimen based on confirmed diagnoses: ${confirmedDiagnoses.join(", ")}.
+      Clinical Narrative: "${context}"
+      Patient History: ${history.join(", ")}
+      
+      Provide 3-4 specific medication options. For each, include:
+      - Medication Name
+      - Dosage
+      - Frequency
+      - Rationale (Why this is indicated based on current presentation and history).
+      
+      Ensure suggestions are standard-of-care and avoid historical contraindications.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            patientName: { type: Type.STRING },
-            reason: { type: Type.STRING },
-            date: { type: Type.STRING, description: "YYYY-MM-DD" },
-            time: { type: Type.STRING, description: "HH:mm" },
-            duration: { type: Type.NUMBER },
-            type: { type: Type.STRING, enum: ["Routine", "Urgent", "Follow-up", "Procedure"] }
+            medications: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  dosage: { type: Type.STRING },
+                  frequency: { type: Type.STRING },
+                  reason: { type: Type.STRING }
+                },
+                required: ["name", "dosage", "frequency", "reason"]
+              }
+            }
+          }
+        }
+      }
+    });
+    const data = JSON.parse(response.text || '{"medications": []}');
+    return data.medications;
+  }).catch(() => []);
+};
+
+export const extractClaimData = async (clinicalNotes: string) => {
+  const cacheKey = `claim_audit_${generateContentHash(clinicalNotes)}`;
+  
+  return callWithRetryAndCache(cacheKey, async () => {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Act as a Certified Medical Auditor. Review these clinical notes for billing:
+      "${clinicalNotes}"
+      
+      Extract:
+      1. ICD-10 diagnosis codes justified by the text.
+      2. CPT procedure/visit codes justified by the text.
+      3. Verbatim 'evidence' quotes for every code.
+      4. Estimated reimbursement yield.
+      5. MDM Complexity level.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            diagnosisCodes: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  code: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  evidence: { type: Type.STRING },
+                  sourceSection: { type: Type.STRING }
+                }
+              } 
+            },
+            procedureCodes: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  code: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  evidence: { type: Type.STRING },
+                  sourceSection: { type: Type.STRING }
+                }
+              } 
+            },
+            estimatedReimbursement: { type: Type.NUMBER },
+            payer: { type: Type.STRING },
+            billingComplexity: { type: Type.STRING }
           }
         }
       }
     });
     return JSON.parse(response.text || '{}');
-  });
-};
-
-export const predictNoShowRisk = async (patientName: string, history: string[]) => {
-  const cacheKey = `noshow_${patientName}`;
-  return callWithRetryAndCache(cacheKey, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Assess the risk of this patient not showing up for their appointment.
-      Patient: ${patientName}
-      Clinical Context: ${history.join(", ")}
-      Return a risk level (Low, Medium, High) and a one-sentence reasoning.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            riskLevel: { type: Type.STRING, enum: ["Low", "Medium", "High"] },
-            reasoning: { type: Type.STRING }
-          }
-        }
-      }
-    });
-    return JSON.parse(response.text || '{"riskLevel": "Low", "reasoning": "Standard profile."}');
-  });
-};
-
-export const getRelatedSymptoms = async (selectedSymptoms: string[]) => {
-  if (selectedSymptoms.length === 0) return [];
-  const cacheKey = `related_symptoms_${selectedSymptoms.sort().join('_')}`;
-  
-  return callWithRetryAndCache(cacheKey, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `The patient has reported these symptoms: ${selectedSymptoms.join(", ")}. 
-      Suggest 6 clinically related symptoms or associated findings that a doctor should check for next. 
-      Return only the symptom names.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            relatedSymptoms: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
-    const data = JSON.parse(response.text || '{"relatedSymptoms": []}');
-    return data.relatedSymptoms;
-  }).catch(() => []);
-};
-
-export const getPlanSuggestions = async (context: string, confirmedDiagnoses: string[] = []) => {
-  const cacheKey = `plan_sugg_${context.substring(0, 50)}_${confirmedDiagnoses.join('_')}`;
-  return callWithRetryAndCache(cacheKey, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Based on this clinical context: "${context}" 
-      AND confirmed diagnoses: ${confirmedDiagnoses.join(", ") || 'None yet selected'}.
-      Suggest 5 high-impact next steps for the clinical plan (e.g., follow-up timelines, specific lifestyle advice, or coordination steps). 
-      If diagnoses are confirmed, suggest management specifically for those.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            suggestions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
-    const data = JSON.parse(response.text || '{"suggestions": []}');
-    return data.suggestions;
-  }).catch(() => []);
-};
-
-export const getPredictionsForPatient = async (patientName: string, history: string[]) => {
-  const cacheKey = `predictions_${patientName}_${history.sort().join('_')}`;
-  return callWithRetryAndCache(cacheKey, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Based on patient history: ${history.join(", ")}, suggest 5 likely diagnostic or management steps for a future plan.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            predictions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
-    const data = JSON.parse(response.text || '{"predictions": []}');
-    return data.predictions;
-  }).catch(() => []);
-};
-
-export const getPatientBriefSummary = async (patient: any) => {
-  const cacheKey = `brief_${patient.id}`;
-  return callWithRetryAndCache(cacheKey, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Create a one-sentence clinical brief for a doctor reviewing an intake.
-      Patient: ${patient.name}, ${patient.age}${patient.gender}.
-      History: ${patient.history.join(", ")}.
-      Vitals: Temp 98.6F, Pulse 72bpm, SpO2 99%.
-      Keep it strictly one sentence, clinical, and high-signal.`,
-    });
-    return response.text;
-  }).catch(() => "Clinically stable patient with longitudinal history; monitoring intake symptoms.");
+  }).catch(() => null);
 };
 
 export const getClinicalContext = async (
@@ -195,28 +161,18 @@ export const getClinicalContext = async (
 ) => {
   if (selectedSymptoms.length === 0 && (!narrative || narrative.length < 10)) return null;
   
-  const cacheKey = `clinical_context_${selectedSymptoms.sort().join('_')}_${history.sort().join('_')}_${confirmedDiagnoses?.join('_')}_${narrative?.length}`;
+  const content = `${selectedSymptoms.join(',')}_${history.join(',')}_${confirmedDiagnoses?.join(',')}_${narrative}`;
+  const cacheKey = `clinical_context_${generateContentHash(content)}`;
   
   return callWithRetryAndCache(cacheKey, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Act as a senior clinical diagnostician.
-      Current Symptoms: ${selectedSymptoms.join(", ")}
-      Longitudinal History: ${history.join(", ")}
-      Confirmed Diagnoses by Provider: ${confirmedDiagnoses?.join(", ") || 'None yet'}
-      ROS Findings (Abnormalities): ${rosFindings?.join(", ") || 'None noted'}
-      Physical Exam Abnormalities: ${examFindings?.join(", ") || 'None noted'}
-      Provider Narrative Notes: "${narrative || 'None'}"
-
-      Provide high-fidelity clinical reasoning. 
-      IMPORTANT: If diagnoses are confirmed, the recommended labs and investigations should specifically aim to manage or further workup those conditions.
+      contents: `Senior Clinician Reasoning Engine.
+      Symptoms: ${selectedSymptoms.join(", ")}
+      History: ${history.join(", ")}
+      Narrative: "${narrative || ''}"
       
-      Provide:
-      1. Differential Diagnoses (Name, Probability 0-1, ICD-10 Code, and Brief Clinical Reasoning).
-      2. Recommended Lab/Imaging investigations (Name, Urgency).
-      3. Safety Alerts: Especially check for interactions between suspected diagnoses and historical conditions.
-      4. A single clinical insight pearl.
-      5. 2 Historical Clinical Twins.`,
+      Provide: Differential diagnoses, Recommended investigations, and Clinical Insights.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -279,115 +235,153 @@ export const processAmbientNotes = async (transcript: string) => {
   return callWithRetryAndCache(null, async () => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Transform this doctor-patient conversation transcript into a structured clinical SOAP note and a cohesive narrative intake summary.
-      Transcript: "${transcript}"`,
+      contents: `Process this transcript: "${transcript}" into a SOAP note.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             narrative: { type: Type.STRING },
-            subjective: { 
-                type: Type.OBJECT, 
-                properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } 
-            },
-            objective: { 
-                type: Type.OBJECT, 
-                properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } 
-            },
-            assessment: { 
-                type: Type.OBJECT, 
-                properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } 
-            },
-            plan: { 
-                type: Type.OBJECT, 
-                properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } 
-            },
+            subjective: { type: Type.OBJECT, properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } },
+            objective: { type: Type.OBJECT, properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } },
+            assessment: { type: Type.OBJECT, properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } },
+            plan: { type: Type.OBJECT, properties: { content: { type: Type.STRING }, confidence: { type: Type.STRING } } },
             medications: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING },
-                        dosage: { type: Type.STRING },
-                        frequency: { type: Type.STRING }
-                    }
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  dosage: { type: Type.STRING },
+                  frequency: { type: Type.STRING }
                 }
+              }
             }
           }
         }
       }
     });
     return JSON.parse(response.text || '{}');
-  }).catch(() => null);
+  });
 };
 
-export const generatePatientFriendlySummary = async (clinicalData: string) => {
-  return callWithRetryAndCache(null, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Create a patient-friendly summary of a medical visit. Avoid jargon. Use clear, reassuring language. 
-      Explain what was discussed, the suspected diagnosis, and the plan in simple terms.
-      Clinical Data: "${clinicalData}"`,
-    });
-    return response.text;
-  }).catch(() => "We had a productive visit today to discuss your symptoms. We are monitoring your progress and have a plan in place for your recovery.");
-};
-
-export const extractClaimData = async (clinicalNotes: string) => {
-  return callWithRetryAndCache(null, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Act as a Certified Medical Auditor and Billing Specialist. Examine these clinical notes and extract Billing Intelligence for a medical claim.
-      Notes: "${clinicalNotes}"`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            diagnosisCodes: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  code: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  evidence: { type: Type.STRING },
-                  sourceSection: { type: Type.STRING }
-                }
-              } 
-            },
-            procedureCodes: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  code: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  evidence: { type: Type.STRING },
-                  sourceSection: { type: Type.STRING }
-                }
-              } 
-            },
-            estimatedReimbursement: { type: Type.NUMBER },
-            payer: { type: Type.STRING },
-            billingComplexity: { type: Type.STRING, description: "Low, Moderate, or High complexity based on MDM." }
-          }
+export const parseSchedulingCommand = async (command: string) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Parse: "${command}" into a schedule object.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          patientName: { type: Type.STRING },
+          reason: { type: Type.STRING },
+          date: { type: Type.STRING },
+          time: { type: Type.STRING },
+          duration: { type: Type.NUMBER },
+          type: { type: Type.STRING }
         }
       }
-    });
-    return JSON.parse(response.text || '{}');
-  }).catch(() => null);
+    }
+  });
+  return JSON.parse(response.text || '{}');
 };
 
-export const generateDischargeSummary = async (patientName: string, bedId: string, checklist: any[]) => {
-  return callWithRetryAndCache(null, async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Generate a professional, concise discharge summary for patient ${patientName} from bed ${bedId}.
-      Checklist completed: ${checklist.filter(i => i.completed).map(i => i.label).join(", ")}.
-      Make it sound clinical and ready for a primary care doctor.`,
-    });
-    return response.text;
-  }).catch(() => "Discharge completed successfully with standard protocols followed.");
+export const predictNoShowRisk = async (name: string, history: string[]) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Assess no-show risk for ${name}. History: ${history.join(",")}`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          riskLevel: { type: Type.STRING },
+          reasoning: { type: Type.STRING }
+        }
+      }
+    }
+  });
+  return JSON.parse(response.text || '{}');
+};
+
+export const getRelatedSymptoms = async (symptoms: string[]) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Related symptoms for: ${symptoms.join(",")}`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          relatedSymptoms: { type: Type.ARRAY, items: { type: Type.STRING } }
+        }
+      }
+    }
+  });
+  const d = JSON.parse(response.text || '{"relatedSymptoms":[]}');
+  return d.relatedSymptoms;
+};
+
+export const getPlanSuggestions = async (context: string, diagnoses: string[]) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Management steps for ${diagnoses.join(",")} given ${context}.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          suggestions: { type: Type.ARRAY, items: { type: Type.STRING } }
+        }
+      }
+    }
+  });
+  const d = JSON.parse(response.text || '{"suggestions":[]}');
+  return d.suggestions;
+};
+
+/**
+ * Predicts recommended management steps for a patient based on their name and history.
+ */
+export const getPredictionsForPatient = async (name: string, history: string[]) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Predict recommended management steps for patient ${name} based on history: ${history.join(", ")}.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          predictions: { type: Type.ARRAY, items: { type: Type.STRING } }
+        }
+      }
+    }
+  });
+  const d = JSON.parse(response.text || '{"predictions":[]}');
+  return d.predictions;
+};
+
+export const getPatientBriefSummary = async (p: any) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Brief summary for patient ${p.name}.`,
+  });
+  return response.text;
+};
+
+export const generatePatientFriendlySummary = async (data: string) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Patient summary for: ${data}`,
+  });
+  return response.text;
+};
+
+export const generateDischargeSummary = async (name: string, bed: string, check: any[]) => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Discharge summary for ${name} at ${bed}.`,
+  });
+  return response.text;
 };
