@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { Appointment, Patient } from '../types';
-import { MOCK_APPOINTMENTS, MOCK_PATIENTS } from '../constants';
 import { parseSchedulingCommand, predictNoShowRisk, getPatientBriefSummary } from '../geminiService';
+import { dataService } from '../dataService';
 import { 
   Calendar, Clock, User, Plus, Search, Sparkles, AlertTriangle, 
   CheckCircle2, ChevronRight, Filter, Command, Mic, Loader2,
@@ -12,26 +11,28 @@ import {
 
 interface Props {
   onSelectPatient: (p: Patient) => void;
+  initialAppointments: Appointment[];
+  initialPatients: Patient[];
 }
 
-const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
-  const [appointments, setAppointments] = useState<Appointment[]>(() => {
-    const saved = localStorage.getItem('flowmd_appointments');
-    return saved ? JSON.parse(saved) : MOCK_APPOINTMENTS;
-  });
+const ClinicDashboard: React.FC<Props> = ({ onSelectPatient, initialAppointments, initialPatients }) => {
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+  const [patients, setPatients] = useState<Patient[]>(initialPatients);
   const [command, setCommand] = useState('');
   const [isParsing, setIsParsing] = useState(false);
   const [parsedData, setParsedData] = useState<any>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   
-  // Detailed patient view for the "Queue" side
   const [selectedPatientInfo, setSelectedPatientInfo] = useState<Patient | null>(null);
   const [patientBrief, setPatientBrief] = useState<string | null>(null);
   const [isBriefing, setIsBriefing] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('flowmd_appointments', JSON.stringify(appointments));
-  }, [appointments]);
+    setAppointments(initialAppointments);
+  }, [initialAppointments]);
+
+  useEffect(() => {
+    setPatients(initialPatients);
+  }, [initialPatients]);
 
   useEffect(() => {
     if (selectedPatientInfo) {
@@ -56,7 +57,7 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
       const data = await parseSchedulingCommand(command);
       setParsedData(data);
       
-      const patient = MOCK_PATIENTS.find(p => p.name.toLowerCase().includes(data.patientName.toLowerCase()));
+      const patient = patients.find(p => p.name.toLowerCase().includes(data.patientName.toLowerCase()));
       if (patient) {
         const risk = await predictNoShowRisk(patient.name, patient.history);
         setParsedData((prev: any) => ({ ...prev, noShowRisk: risk.riskLevel, riskReasoning: risk.reasoning }));
@@ -68,30 +69,38 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
     }
   };
 
-  const confirmBooking = () => {
+  const confirmBooking = async () => {
     if (!parsedData) return;
     
     const newAppt: Appointment = {
       id: Math.random().toString(36).substring(7),
       patientId: 'new',
       patientName: parsedData.patientName,
-      startTime: new Date(`${parsedData.date}T${parsedData.time}`).getTime().toString(),
-      endTime: new Date(`${parsedData.date}T${parsedData.time}`).getTime() + (parsedData.duration || 30) * 60000 + '',
+      startTime: new Date(`${parsedData.date}T${parsedData.time}`).toISOString(),
+      endTime: new Date(new Date(`${parsedData.date}T${parsedData.time}`).getTime() + (parsedData.duration || 30) * 60000).toISOString(),
       reason: parsedData.reason,
       type: parsedData.type || 'Routine',
       noShowRisk: parsedData.noShowRisk || 'Low',
       status: 'Scheduled'
     };
 
-    setAppointments(prev => [...prev, newAppt]);
-    setParsedData(null);
-    setCommand('');
+    const success = await dataService.upsertAppointment(newAppt);
+    if (success) {
+      setAppointments(prev => [...prev, newAppt]);
+      setParsedData(null);
+      setCommand('');
+    }
   };
 
-  const handleCheckIn = (apptId: string) => {
-    setAppointments(prev => prev.map(a => 
-      a.id === apptId ? { ...a, status: 'Arrived' } : a
-    ));
+  const handleCheckIn = async (apptId: string) => {
+    const appt = appointments.find(a => a.id === apptId);
+    if (!appt) return;
+
+    const updated = { ...appt, status: 'Arrived' as const };
+    const success = await dataService.upsertAppointment(updated);
+    if (success) {
+      setAppointments(prev => prev.map(a => a.id === apptId ? updated : a));
+    }
   };
 
   const getRiskColor = (risk: string) => {
@@ -104,11 +113,10 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
 
   const activeQueue = appointments.filter(a => a.status === 'Arrived' || a.status === 'In-Progress');
   const upcomingSchedule = appointments.filter(a => a.status === 'Scheduled');
-  const sortedUpcoming = [...upcomingSchedule].sort((a, b) => parseInt(a.startTime) - parseInt(b.startTime));
+  const sortedUpcoming = [...upcomingSchedule].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
   return (
     <div className="p-6 pb-32 space-y-8 animate-in fade-in duration-500">
-      {/* Header Deck */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Clinic Mission Control</h2>
@@ -126,7 +134,6 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
         </div>
       </div>
 
-      {/* Unified AI Command Bar */}
       <div className="relative group">
         <form onSubmit={handleCommandSubmit} className="relative z-10">
             <div className={`absolute left-6 top-1/2 -translate-y-1/2 transition-colors ${isParsing ? 'text-blue-500' : 'text-slate-400'}`}>
@@ -193,7 +200,6 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-        {/* Section 1: Active Queue */}
         <div className="space-y-6">
             <div className="flex items-center justify-between px-2">
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-900 flex items-center gap-2">
@@ -209,7 +215,7 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
                         <p className="text-[11px] font-black uppercase tracking-widest">No patients in lobby</p>
                     </div>
                 ) : activeQueue.map(appt => {
-                    const patientObj = MOCK_PATIENTS.find(p => p.name === appt.patientName);
+                    const patientObj = patients.find(p => p.name === appt.patientName);
                     return (
                         <div key={appt.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all">
                             <div className="flex items-center gap-5">
@@ -241,7 +247,6 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
             </div>
         </div>
 
-        {/* Section 2: Upcoming Flow */}
         <div className="space-y-6">
             <div className="flex items-center justify-between px-2">
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
@@ -252,7 +257,7 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
 
             <div className="space-y-4">
                 {sortedUpcoming.map(appt => {
-                    const time = new Date(parseInt(appt.startTime)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const time = new Date(appt.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     return (
                         <div key={appt.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all">
                             <div className="flex items-center gap-5">
@@ -282,7 +287,6 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
         </div>
       </div>
 
-      {/* Predictive Insight Toast */}
       <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl shadow-slate-200 relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl transition-transform group-hover:scale-110"></div>
           <div className="flex items-center gap-2 mb-4">
@@ -301,7 +305,6 @@ const ClinicDashboard: React.FC<Props> = ({ onSelectPatient }) => {
           </div>
       </div>
 
-      {/* Patient Profile Quick-View Modal */}
       {selectedPatientInfo && (
         <div className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-xl flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">

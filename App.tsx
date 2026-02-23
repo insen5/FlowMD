@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect } from 'react';
-import { ViewState, Patient, Bed } from './types';
-import { MOCK_PATIENTS, INITIAL_BEDS } from './constants';
+import { ViewState, Patient, Bed, Appointment } from './types';
+import { INITIAL_BEDS } from './constants';
 import ClinicalInterface from './components/ClinicalInterface';
 import BedManagement from './components/BedManagement';
 import ClinicDashboard from './components/ClinicDashboard';
 import { Activity, LayoutGrid, LayoutDashboard, Database } from 'lucide-react';
+import { dataService } from './dataService';
 
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<ViewState>(() => {
@@ -21,8 +21,30 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('flowmd_beds');
     return saved ? JSON.parse(saved) : INITIAL_BEDS;
   });
-  
+
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const [p, a] = await Promise.all([
+          dataService.getPatients(),
+          dataService.getAppointments()
+        ]);
+        setPatients(p);
+        setAppointments(a);
+      } catch (err) {
+        console.error("Supabase fetch failed", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -68,22 +90,33 @@ const App: React.FC = () => {
           <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-slate-200">F</div>
           <div>
             <h1 className="text-xl font-black tracking-tighter text-slate-900 leading-none">Flow<span className="text-blue-600">MD</span></h1>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mt-1">Clinical Engine • PWA</p>
+            <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mt-1">Clinical Engine • Supabase Persistence</p>
           </div>
         </div>
         
         <div className="flex items-center gap-4">
           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${isOnline ? 'bg-green-50 text-green-600 border-green-100' : 'bg-red-50 text-red-500 border-red-100'}`}>
             <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-            {isOnline ? 'Cloud Sync' : 'Local Vault'}
+            {isOnline ? 'Postgres Sync' : 'Local Vault'}
           </div>
           <div className="w-10 h-10 rounded-2xl border-2 border-slate-50 bg-blue-50 text-blue-600 flex items-center justify-center text-xs font-black shadow-inner">DR</div>
         </div>
       </header>
 
       <main className="flex-1 overflow-y-auto relative no-scrollbar bg-slate-50">
+        {isLoading && (
+          <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+            <Database size={32} className="text-blue-600 animate-bounce mb-4" />
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Hydrating Clinical State...</p>
+          </div>
+        )}
+        
         {activeView === ViewState.DASHBOARD && (
-          <ClinicDashboard onSelectPatient={handlePatientSelect} />
+          <ClinicDashboard 
+            onSelectPatient={handlePatientSelect} 
+            initialAppointments={appointments}
+            initialPatients={patients}
+          />
         )}
         {activeView === ViewState.VISIT && selectedPatient && (
           <ClinicalInterface 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Patient, Medication, ClinicalContext, VisitSOAP, SOAPSegment, ClaimData, DifferentialDiagnosis, JustifiedCode } from '../types';
 import { COMMON_SYMPTOMS } from '../constants';
+import { dataService } from '../dataService';
 import { 
   getPredictionsForPatient, processAmbientNotes, getClinicalContext, 
   extractClaimData, generatePatientFriendlySummary, getRelatedSymptoms, 
@@ -75,23 +76,17 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
   const [isAddingMed, setIsAddingMed] = useState(false);
   const [newMed, setNewMed] = useState({ name: '', dosage: '', frequency: '' });
   
-  const [soapDraft, setSoapDraft] = useState<VisitSOAP>(() => {
-    const saved = localStorage.getItem(`soap_draft_${patient.id}`);
-    return saved ? JSON.parse(saved) : {
-      subjective: { content: '', confidence: 'low', approved: false },
-      objective: { content: '', confidence: 'low', approved: false },
-      assessment: { content: '', confidence: 'low', approved: false },
-      plan: { content: '', confidence: 'low', approved: false },
-      medications: []
-    };
+  const [soapDraft, setSoapDraft] = useState<VisitSOAP>({
+    subjective: { content: '', confidence: 'low', approved: false },
+    objective: { content: '', confidence: 'low', approved: false },
+    assessment: { content: '', confidence: 'low', approved: false },
+    plan: { content: '', confidence: 'low', approved: false },
+    medications: []
   });
 
-  const [manualNotes, setManualNotes] = useState<string>(() => {
-    return localStorage.getItem(`manual_notes_${patient.id}`) || '';
-  });
+  const [manualNotes, setManualNotes] = useState<string>('');
   const [transcriptSegments, setTranscriptSegments] = useState<{ role: 'Doctor' | 'Patient', text: string }[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  
   const [isExtractingClaim, setIsExtractingClaim] = useState(false);
   const [claimData, setClaimData] = useState<ClaimData | null>(null);
   const [patientSummary, setPatientSummary] = useState<string>('');
@@ -100,6 +95,30 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
 
   const recognitionRef = useRef<any>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const hydrateFromPostgres = async () => {
+      // Find the most recent appointment for this patient to load relevant notes
+      const appts = await dataService.getAppointments();
+      const patientAppt = appts.find(a => a.patientId === patient.id || a.patientName === patient.name);
+      
+      if (patientAppt) {
+        const savedSoap = await dataService.getSOAPNote(patientAppt.id);
+        if (savedSoap) {
+          setSoapDraft({
+            subjective: { content: savedSoap.subjective_content, confidence: 'high', approved: true },
+            objective: { content: savedSoap.objective_content, confidence: 'high', approved: true },
+            assessment: { content: savedSoap.assessment_content, confidence: 'high', approved: true },
+            plan: { content: savedSoap.plan_content, confidence: 'high', approved: !!savedSoap.finalized_at },
+            medications: [] // Typically joined from medications table in production
+          });
+          setManualNotes(savedSoap.manual_narrative || '');
+          if (editorRef.current) editorRef.current.innerHTML = savedSoap.manual_narrative || '';
+        }
+      }
+    };
+    hydrateFromPostgres();
+  }, [patient]);
 
   useEffect(() => {
     const fetchInitialPlan = async () => {
@@ -123,7 +142,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
     }
   }, [selectedSymptoms]); 
 
-  // Dynamic Plan & Regimen Refinement
   useEffect(() => {
     if (selectedDiagnoses.length > 0 || manualNotes.length > 30) {
       const refinePlan = async () => {
@@ -146,18 +164,21 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
       };
       const timer = setTimeout(refinePlan, 1500);
       return () => clearTimeout(timer);
-    } else {
-      setRegimenPredictions([]);
     }
   }, [selectedDiagnoses, manualNotes, selectedSymptoms, patient.history]);
 
+  // Persistent Cloud Sync
   useEffect(() => {
-    localStorage.setItem(`soap_draft_${patient.id}`, JSON.stringify(soapDraft));
-  }, [soapDraft, patient.id]);
-
-  useEffect(() => {
-    localStorage.setItem(`manual_notes_${patient.id}`, manualNotes);
-  }, [manualNotes, patient.id]);
+    const syncToCloud = async () => {
+        const appts = await dataService.getAppointments();
+        const activeAppt = appts.find(a => a.patientName === patient.name);
+        if (activeAppt) {
+            await dataService.saveSOAPNote(activeAppt.id, patient.id, soapDraft, manualNotes);
+        }
+    };
+    const timer = setTimeout(syncToCloud, 10000); // Debounced sync
+    return () => clearTimeout(timer);
+  }, [soapDraft, manualNotes, patient]);
 
   useEffect(() => {
     const updateContext = async () => {
@@ -281,9 +302,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
 
   const handleFinalSubmit = async () => {
     setPreviewTab('revenue');
-    
-    // The GeminiService now handles content-based caching internally, 
-    // but we can still track UI state here.
     setIsExtractingClaim(true);
     const plainManualNotes = editorRef.current?.innerText || manualNotes;
     const clinicalSummary = `
@@ -438,7 +456,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
-      {/* Header */}
       <div className="p-4 bg-white border-b border-slate-200 z-20 shrink-0 shadow-sm">
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -471,7 +488,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex bg-white px-4 border-b border-slate-200 shrink-0 overflow-x-auto no-scrollbar">
         {(['symptoms', 'assessment', 'plan', 'similarPatients'] as const).map(tab => (
           <button
@@ -489,7 +505,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
       <div className="flex-1 overflow-y-auto no-scrollbar pb-32 relative">
         {activeTab === 'symptoms' && (
           <div className="p-6 space-y-12 animate-in fade-in duration-300">
-            {/* Longitudinal Diagnosis Journey */}
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-900 font-black text-[10px] uppercase tracking-widest">
@@ -530,7 +545,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
               </div>
             </div>
 
-            {/* Predictive Search Section */}
             <div className="space-y-4 pt-6 border-t border-slate-100">
               <div className="flex items-center gap-2 text-slate-900 font-black text-[10px] uppercase tracking-widest">
                 <Search size={14} className="text-blue-600" /> Intake Search
@@ -560,7 +574,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
               </div>
             </div>
 
-            {/* Captured Symptoms Section */}
             {selectedSymptoms.length > 0 && (
               <div className="space-y-4 animate-in zoom-in-95">
                 <div className="flex items-center gap-2 text-slate-900 font-black text-[10px] uppercase tracking-widest">
@@ -580,7 +593,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
               </div>
             )}
 
-            {/* Smart Clinical Associations */}
             {relatedSymptoms.length > 0 && (
               <div className="space-y-4 animate-in slide-in-from-right-10 overflow-hidden">
                 <div className="flex items-center gap-2 text-slate-900 font-black text-[10px] uppercase tracking-widest">
@@ -621,7 +633,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
               </div>
             </div>
 
-            {/* Narrative Intake Notes */}
             <div className="space-y-4 pt-8 border-t border-slate-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-slate-900 font-black text-[10px] uppercase tracking-widest">
@@ -753,7 +764,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
 
         {activeTab === 'plan' && (
           <div className="p-6 space-y-12 animate-in slide-in-from-bottom-5">
-            {/* Suggested Regimen Section (AI-First) */}
             {regimenPredictions.length > 0 && (
                 <div className="space-y-4 animate-in slide-in-from-top-4">
                     <div className="flex items-center justify-between">
@@ -900,67 +910,10 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                   </div>
                 </div>
               ))}
-              {!clinicalContext?.similarCases && (
-                <div className="p-16 text-center bg-white rounded-[2.5rem] border border-dashed border-slate-200 text-slate-400">
-                    <History size={30} className="mx-auto mb-4 opacity-30 animate-pulse" />
-                    <p className="text-[11px] font-black uppercase tracking-widest">Identifying clinically similar longitudinal twins...</p>
-                </div>
-              )}
             </div>
           </div>
         )}
       </div>
-
-      {isAddingMed && (
-        <div className="fixed inset-0 z-[110] bg-slate-900/40 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-               <h3 className="font-black text-slate-900 uppercase tracking-widest text-[11px]">Draft Prescription</h3>
-               <button onClick={() => setIsAddingMed(false)} className="text-slate-300 hover:text-slate-900 transition-colors"><X size={20}/></button>
-            </div>
-            <div className="p-8 space-y-5">
-               <div className="space-y-1">
-                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Medication Name</label>
-                 <input 
-                    type="text" 
-                    placeholder="e.g. Amoxicillin" 
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                    value={newMed.name}
-                    onChange={(e) => setNewMed({...newMed, name: e.target.value})}
-                 />
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-1">
-                   <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Dosage</label>
-                   <input 
-                      type="text" 
-                      placeholder="500mg" 
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      value={newMed.dosage}
-                      onChange={(e) => setNewMed({...newMed, dosage: e.target.value})}
-                   />
-                 </div>
-                 <div className="space-y-1">
-                   <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1">Frequency</label>
-                   <input 
-                      type="text" 
-                      placeholder="BID" 
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      value={newMed.frequency}
-                      onChange={(e) => setNewMed({...newMed, frequency: e.target.value})}
-                   />
-                 </div>
-               </div>
-               <button 
-                 onClick={() => handleAddMedication()}
-                 className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[10px] shadow-xl active:scale-95 transition-all mt-4"
-               >
-                 Confirm Prescription
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isPreviewOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-2xl flex items-center justify-center p-4">
@@ -1005,7 +958,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                           <span className="text-lg font-black text-blue-600">${claimData.estimatedReimbursement}</span>
                         </div>
                       </div>
-
                       <div className="space-y-4">
                         <div className="text-[9px] font-black uppercase text-slate-400 tracking-[0.2em] flex items-center gap-2">
                           <ShieldCheck size={14} className="text-blue-500" /> Diagnosis Codes (ICD-10)
@@ -1014,7 +966,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                           {claimData.diagnosisCodes.map((jc: any) => renderJustifiedCode(jc))}
                         </div>
                       </div>
-
                       <div className="space-y-4">
                         <div className="text-[9px] font-black uppercase text-slate-400 tracking-[0.2em] flex items-center gap-2">
                           <Layers size={14} className="text-blue-500" /> Procedure Codes (CPT)
@@ -1023,29 +974,10 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                           {claimData.procedureCodes.map((jc: any) => renderJustifiedCode(jc))}
                         </div>
                       </div>
-
-                      <button onClick={onBack} className="w-full mt-6 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all">Archive & Sync to Clearinghouse</button>
+                      <button onClick={onBack} className="w-full mt-6 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all">Archive & Sync to Postgres</button>
                     </div>
                   ) : (
                     <div className="p-16 text-center text-slate-400 italic">Audit failed. Please try again.</div>
-                  )}
-                </div>
-              )}
-
-              {previewTab === 'handout' && (
-                <div className="p-8 bg-emerald-50 rounded-[3rem] border-2 border-emerald-100 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="space-y-4 font-serif text-slate-700 leading-relaxed italic text-sm">
-                    {isGeneratingSummary ? (
-                        <div className="flex flex-col items-center gap-3 py-8">
-                             <Sparkles className="text-emerald-500 animate-pulse" />
-                             <p className="text-[10px] font-sans font-black uppercase tracking-widest text-emerald-600">Simplifying clinical findings...</p>
-                        </div>
-                    ) : (
-                        patientSummary ? patientSummary.split('\n').map((line, idx) => <p key={idx}>{line}</p>) : "No handout generated yet."
-                    )}
-                  </div>
-                  {!isGeneratingSummary && (
-                      <button className="mt-6 w-full py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100">Portal Release</button>
                   )}
                 </div>
               )}
@@ -1060,10 +992,6 @@ const ClinicalInterface: React.FC<Props> = ({ patient, onBack }) => {
                     <div>
                       <div className="text-[9px] font-sans font-black uppercase text-blue-600 mb-1">Provider Findings</div>
                       <div className="text-sm prose prose-slate leading-relaxed" dangerouslySetInnerHTML={{ __html: manualNotes }} />
-                    </div>
-                    <div>
-                      <div className="text-[9px] font-sans font-black uppercase text-blue-600 mb-1">Plan Summary</div>
-                      <p className="text-sm leading-relaxed whitespace-pre-line">{soapDraft.plan.content || "Documentation pending finalization..."}</p>
                     </div>
                   </div>
                 </div>
